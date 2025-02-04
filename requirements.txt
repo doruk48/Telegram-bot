@@ -1,0 +1,2 @@
+pyTelegramBotAPI==4.7.0
+requests==2.25.1  # Eğer HTTP istekleri yapıyorsanız
