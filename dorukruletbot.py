@@ -4,7 +4,7 @@ import random
 from threading import Timer
 
 # Bot Token
-TOKEN = '7912106541:AAHZI3rwpZCbGXt508FqaY9kE-gdIsZFNU8'
+TOKEN = '7912106541:AAHZI3rwpZCbGXt508FqaY9kE-gdIsZFNU8'  # Burada kendi bot token'ınızı ekleyin
 bot = telebot.TeleBot(TOKEN)
 
 # Kullanıcı bakiyeleri ve bahisler
@@ -15,6 +15,7 @@ selected_bet_amount = {}  # Kullanıcıların seçtiği bahis miktarı
 active_games = set()  # Aktif oyunları takip etmek için
 manual_bet_users = {}  # Manuel giriş yapan kullanıcıları takip etmek için
 bet_message_ids = {}  # Bahis butonlarının mesaj kimliklerini takip etmek için
+roulette_image_message_ids = {}  # Çark görseli mesaj kimliklerini takip etmek için
 
 # Rulet görselleri klasör yolu
 roulette_images_folder = '/storage/emulated/0/Rulet/'
@@ -70,7 +71,7 @@ def create_bet_buttons():
 # Sayı seçme butonları
 def create_number_buttons():
     markup = types.InlineKeyboardMarkup(row_width=6)
-    buttons = [types.InlineKeyboardButton(str(i), callback_data=f'bet_number_{i}') for i in range(37)]
+    buttons = [types.InlineKeyboardButton(str(i), callback_data=f'number_{i}') for i in range(37)]
     markup.add(*buttons)
     btn_back = types.InlineKeyboardButton("⬅️ Geri", callback_data='bet_back')
     markup.add(btn_back)
@@ -115,20 +116,20 @@ def start_rulet(message):
     user_balances.setdefault(user_id, 10000000000)  # Varsayılan bakiye (10B DTC)
     selected_bet_amount[chat_id] = 5000  # Varsayılan bahis miktarı
 
-    bot.send_message(chat_id, f"Rulet oyununa hoş geldiniz! Bakiyeniz: {format_amount(user_balances[user_id])}")
-    bet_amount_message = bot.send_message(chat_id, "Bahis miktarınızı seçin:", reply_markup=create_bet_amount_buttons())
-    bet_message = bot.send_message(chat_id, "Bahislerinizi yapabilirsiniz!", reply_markup=create_bet_buttons())
-    
-    bet_message_ids[chat_id] = [bet_amount_message.message_id, bet_message.message_id]
-    
     try:
         image_path = f"{roulette_images_folder}rulet.çark.jpg"
         with open(image_path, 'rb') as image_file:
-            bot.send_photo(chat_id, image_file)
+            roulette_image_message = bot.send_photo(chat_id, image_file)
+            roulette_image_message_ids[chat_id] = roulette_image_message.message_id
     except FileNotFoundError:
         bot.send_message(chat_id, "Çark görseli bulunamadı.")
         active_games.remove(chat_id)
         return
+
+    bet_amount_message = bot.send_message(chat_id, "Bahis miktarınızı seçin:", reply_markup=create_bet_amount_buttons())
+    bet_message = bot.send_message(chat_id, "Bahislerinizi yapabilirsiniz!", reply_markup=create_bet_buttons())
+    
+    bet_message_ids[chat_id] = [bet_amount_message.message_id, bet_message.message_id]
 
     bets = {}  # Bahisleri temizle
     bot.send_message(chat_id, "Bahis yapmak için 25 saniyeniz var!")
@@ -159,7 +160,7 @@ def handle_bets(call):
         bet_type = call.data.split('_')[1]
 
         if bet_type == 'numbers':
-            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_bet_buttons_with_numbers())
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_number_buttons())
         elif bet_type == 'back':
             bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_bet_buttons())
         else:
@@ -188,6 +189,17 @@ def handle_bets(call):
                 bets.setdefault(user_id, []).append((bet_type, bet_amount))
                 bot.send_message(chat_id, f"{symbol} {bet_type.upper()} için {format_amount(bet_amount)} bahis yaptınız.")
 
+    elif call.data.startswith('number_'):
+        bet_number = call.data.split('_')[1]
+        bet_amount = selected_bet_amount[chat_id]
+        if bet_amount > user_balances[user_id]:
+            bot.send_message(chat_id, "Yetersiz bakiye!")
+            return
+
+        user_balances[user_id] -= bet_amount
+        bets.setdefault(user_id, []).append((bet_number, bet_amount))
+        bot.send_message(chat_id, f"Number {bet_number} için {format_amount(bet_amount)} bahis yaptınız.")
+
 def process_manual_bet_amount(message, chat_id, user_id):
     if user_id in manual_bet_users and manual_bet_users[user_id] == chat_id:
         try:
@@ -202,36 +214,21 @@ def process_manual_bet_amount(message, chat_id, user_id):
         finally:
             del manual_bet_users[user_id]  # İşlem tamamlandıktan sonra kullanıcıyı listeden çıkar
 
-# Bahis ve sayı butonlarını birleştirme
-def create_bet_buttons_with_numbers():
-    markup = types.InlineKeyboardMarkup(row_width=6)
-    bet_buttons = [
-        types.InlineKeyboardButton("🔴 Kırmızı", callback_data='bet_red'),
-        types.InlineKeyboardButton("⚫ Siyah", callback_data='bet_black'),
-        types.InlineKeyboardButton("🟢 Yeşil", callback_data='bet_green'),
-        types.InlineKeyboardButton("Çift", callback_data='bet_even'),
-        types.InlineKeyboardButton("Tek", callback_data='bet_odd'),
-        types.InlineKeyboardButton("1-12", callback_data='bet_first12'),
-        types.InlineKeyboardButton("13-24", callback_data='bet_second12'),
-        types.InlineKeyboardButton("25-36", callback_data='bet_third12')
-    ]
-    number_buttons = [types.InlineKeyboardButton(str(i), callback_data=f'bet_number_{i}') for i in range(37)]
-    markup.add(*bet_buttons)
-    markup.add(*number_buttons)
-    markup.add(types.InlineKeyboardButton("⬅️ Geri", callback_data='bet_back'))
-    return markup
-
 # Rulet oyunu
 def roulette_game(chat_id):
     global bets  # Global olarak deklarasyon
     result = random.randint(0, 36)
+
+    bot.send_message(chat_id, "Bahisler kapandı!")
 
     # Bahisler kapandı mesajı ve görseli silme
     if chat_id in bet_message_ids:
         for message_id in bet_message_ids[chat_id]:
             bot.delete_message(chat_id, message_id)
 
-    bot.send_message(chat_id, "Bahisler kapandı!")
+    # Çark görselini silme
+    if chat_id in roulette_image_message_ids:
+        bot.delete_message(chat_id, roulette_image_message_ids[chat_id])
 
     # Sonuç sembolü ve rengi
     result_color = roulette_colors[result]
