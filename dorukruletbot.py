@@ -46,7 +46,8 @@ def create_bet_amount_buttons():
     btn_1B = types.InlineKeyboardButton("1B DTC 💰", callback_data='amount_1000000000')
     btn_10B = types.InlineKeyboardButton("10B DTC 💰", callback_data='amount_10000000000')
     btn_manual = types.InlineKeyboardButton("Manuel Giriş 💬", callback_data='amount_manual')
-    markup.add(btn_5000, btn_10000, btn_1B, btn_10B)
+    markup.add(btn_5000, btn_10000)
+    markup.add(btn_1B, btn_10B)
     markup.add(btn_manual)
     return markup
 
@@ -61,20 +62,9 @@ def create_bet_buttons():
     btn_first12 = types.InlineKeyboardButton("1-12", callback_data='bet_first12')
     btn_second12 = types.InlineKeyboardButton("13-24", callback_data='bet_second12')
     btn_third12 = types.InlineKeyboardButton("25-36", callback_data='bet_third12')
-    btn_numbers = types.InlineKeyboardButton("Sayı Seç", callback_data='bet_numbers')
     markup.add(btn_red, btn_black, btn_green)
     markup.add(btn_even, btn_odd)
     markup.add(btn_first12, btn_second12, btn_third12)
-    markup.add(btn_numbers)
-    return markup
-
-# Sayı seçme butonları
-def create_number_buttons():
-    markup = types.InlineKeyboardMarkup(row_width=6)
-    buttons = [types.InlineKeyboardButton(str(i), callback_data=f'number_{i}') for i in range(37)]
-    markup.add(*buttons)
-    btn_back = types.InlineKeyboardButton("⬅️ Geri", callback_data='bet_back')
-    markup.add(btn_back)
     return markup
 
 # Kullanıcı adını alma fonksiyonu
@@ -121,15 +111,15 @@ def start_rulet(message):
         with open(image_path, 'rb') as image_file:
             roulette_image_message = bot.send_photo(chat_id, image_file)
             roulette_image_message_ids[chat_id] = roulette_image_message.message_id
+
+        bet_message = bot.send_message(chat_id, "Bahis miktarınızı seçin ve bahisinizi yapın:", reply_markup=create_bet_amount_buttons())
+        bet_options_message = bot.send_message(chat_id, "Bahis seçenekleriniz:", reply_markup=create_bet_buttons())
+        
+        bet_message_ids[chat_id] = [roulette_image_message.message_id, bet_message.message_id, bet_options_message.message_id]
     except FileNotFoundError:
         bot.send_message(chat_id, "Çark görseli bulunamadı.")
         active_games.remove(chat_id)
         return
-
-    bet_amount_message = bot.send_message(chat_id, "Bahis miktarınızı seçin:", reply_markup=create_bet_amount_buttons())
-    bet_message = bot.send_message(chat_id, "Bahislerinizi yapabilirsiniz!", reply_markup=create_bet_buttons())
-    
-    bet_message_ids[chat_id] = [bet_amount_message.message_id, bet_message.message_id]
 
     bets = {}  # Bahisleri temizle
     bot.send_message(chat_id, "Bahis yapmak için 25 saniyeniz var!")
@@ -157,13 +147,9 @@ def handle_bets(call):
                 print(f"Error answering callback query: {e}")
 
     elif call.data.startswith('bet_'):
-        bet_type = call.data.split('_')[1]
+        bet_type = call.data.split('_')[1] if len(call.data.split('_')) > 1 else None
 
-        if bet_type == 'numbers':
-            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_number_buttons())
-        elif bet_type == 'back':
-            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_bet_buttons())
-        else:
+        if bet_type:
             bet_amount = selected_bet_amount[chat_id]
             if bet_amount > user_balances[user_id]:
                 bot.send_message(chat_id, "Yetersiz bakiye!")
@@ -177,28 +163,9 @@ def handle_bets(call):
                 symbol = '⚫'
             elif bet_type == 'green':
                 symbol = '🟢'
-            elif bet_type.startswith('number'):
-                bet_number = bet_type.split('_')[1]
-                symbol = f'{bet_number}'
 
-            if bet_type.startswith('number_'):
-                bet_number = bet_type.split('_')[1]
-                bets.setdefault(user_id, []).append((bet_number, bet_amount))
-                bot.send_message(chat_id, f"{symbol} number {bet_number} için {format_amount(bet_amount)} bahis yaptınız.")
-            else:
-                bets.setdefault(user_id, []).append((bet_type, bet_amount))
-                bot.send_message(chat_id, f"{symbol} {bet_type.upper()} için {format_amount(bet_amount)} bahis yaptınız.")
-
-    elif call.data.startswith('number_'):
-        bet_number = call.data.split('_')[1]
-        bet_amount = selected_bet_amount[chat_id]
-        if bet_amount > user_balances[user_id]:
-            bot.send_message(chat_id, "Yetersiz bakiye!")
-            return
-
-        user_balances[user_id] -= bet_amount
-        bets.setdefault(user_id, []).append((bet_number, bet_amount))
-        bot.send_message(chat_id, f"Number {bet_number} için {format_amount(bet_amount)} bahis yaptınız.")
+            bets.setdefault(user_id, []).append((bet_type, bet_amount))
+            bot.send_message(chat_id, f"{symbol} {bet_type.upper()} için {format_amount(bet_amount)} bahis yaptınız.")
 
 def process_manual_bet_amount(message, chat_id, user_id):
     if user_id in manual_bet_users and manual_bet_users[user_id] == chat_id:
@@ -224,11 +191,17 @@ def roulette_game(chat_id):
     # Bahisler kapandı mesajı ve görseli silme
     if chat_id in bet_message_ids:
         for message_id in bet_message_ids[chat_id]:
-            bot.delete_message(chat_id, message_id)
+            try:
+                bot.delete_message(chat_id, message_id)
+            except telebot.apihelper.ApiTelegramException as e:
+                print(f"Error deleting message: {e}")
 
     # Çark görselini silme
     if chat_id in roulette_image_message_ids:
-        bot.delete_message(chat_id, roulette_image_message_ids[chat_id])
+        try:
+            bot.delete_message(chat_id, roulette_image_message_ids[chat_id])
+        except telebot.apihelper.ApiTelegramException as e:
+            print(f"Error deleting roulette image message: {e}")
 
     # Sonuç sembolü ve rengi
     result_color = roulette_colors[result]
@@ -295,6 +268,47 @@ def roulette_game(chat_id):
     bets.clear()
     active_games.remove(chat_id)
 
+# Manuel sayı bahis komutu
+@bot.message_handler(commands=['number'])
+def manual_number_bet(message):
+    try:
+        _, amount, number = message.text.split()
+        amount = int(amount)
+        number = int(number)
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+
+        if amount > user_balances.get(user_id, 10000000000):
+            bot.send_message(chat_id, "Yetersiz bakiye!")
+            return
+
+        user_balances[user_id] -= amount
+        bets.setdefault(user_id, []).append((str(number), amount))
+        bot.send_message(chat_id, f"Number {number} için {format_amount(amount)} bahis yaptınız.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Geçersiz komut. Kullanım: /number [miktar] [sayı]")
+
+# Çoklu sayı bahis komutu
+@bot.message_handler(commands=['multinumber'])
+def manual_multi_number_bet(message):
+    try:
+        parts = message.text.split()
+        amount = int(parts[1])
+        numbers = [int(n) for n in parts[2:]]
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+
+        if amount * len(numbers) > user_balances.get(user_id, 10000000000):
+            bot.send_message(chat_id, "Yetersiz bakiye!")
+            return
+
+        user_balances[user_id] -= amount * len(numbers)
+        for number in numbers:
+            bets.setdefault(user_id, []).append((str(number), amount))
+        bot.send_message(chat_id, f"{numbers} için her biri {format_amount(amount)} olacak şekilde bahis yaptınız.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Geçersiz komut. Kullanım: /multinumber [miktar] [sayı1] [sayı2] ...")
+
 # Para gönderme komutu
 @bot.message_handler(commands=['moneys'])
 def send_money(message):
@@ -318,6 +332,8 @@ def help_command(message):
         "/changename [yeni isim] - Kullanıcı adınızı değiştirir.\n"
         "/balance - Bakiyenizi gösterir.\n"
         "/rulet - Rulet oyununu başlatır.\n"
+        "/number [miktar] [sayı] - Belirtilen sayıya belirtilen miktarda bahis yapar.\n"
+        "/multinumber [miktar] [sayı1] [sayı2] ... - Belirtilen sayılara belirtilen miktarda bahis yapar.\n"
         "/moneys [ID] [miktar] - Belirtilen ID'ye belirtilen miktarda para gönderir.\n"
     )
     bot.send_message(message.chat.id, help_text)
